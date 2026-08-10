@@ -132,3 +132,7 @@ davinci-resolve-mcp-analysis/
 # capture script, and one-off repro scripts. Never shipped. See local/README.md.
 /local/
 .claude/launch.json
+
+# Local, per-machine Claude Code overrides. settings.json IS tracked (the guards
+# live there); this is the personal layer that must not follow it into git.
+.claude/settings.local.json

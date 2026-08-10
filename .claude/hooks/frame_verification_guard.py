@@ -18,18 +18,34 @@ import sys
 from typing import Any, Dict, List
 
 # Actions on timeline_item_color that write grade state to the project.
+#
+# The raw actions matter as much as the safe_ twins. `set_cdl` and `copy_grades`
+# reach the same item.SetCDL() / item.CopyGrades() calls as safe_set_cdl and
+# safe_copy_grade -- they skip the payload validator, not the write. Listing only
+# the safe_ names meant a caller could apply a grade with no frame ever inspected
+# simply by choosing the shorter name, which is the failure this hook exists to
+# prevent.
+#
+# The color-group pair is here because assigning a clip to a group makes that
+# group's pre/post-clip graph render on the clip, and removing it drops that
+# grade again. Both change the picture without touching the clip's own nodes.
 GRADE_APPLY_ACTIONS = {
     "safe_set_cdl",
     "safe_copy_grade",
     "safe_apply_drx",
     "bulk_match_to_hero",
     "propose_grade",
+    "set_cdl",
+    "copy_grades",
+    "assign_color_group",
+    "remove_from_color_group",
 }
 
 # Whole-grade artifacts applied across many clips. These are the actions that
 # overwrite hand-work irrecoverably, so they always surface to the user even
-# when frame evidence exists.
-BULK_APPLY_ACTIONS = {"safe_copy_grade", "bulk_match_to_hero"}
+# when frame evidence exists. `copy_grades` takes a target_ids list and is the
+# rawest of them: one call can overwrite every clip on the timeline.
+BULK_APPLY_ACTIONS = {"safe_copy_grade", "bulk_match_to_hero", "copy_grades"}
 
 # Tools whose use counts as having looked at frames.
 EVIDENCE_TOOLS = {

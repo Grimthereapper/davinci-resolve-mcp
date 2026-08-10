@@ -1,0 +1,39 @@
+# Lint config. Deliberately narrow.
+#
+# Ruff's broad rulesets report ~6,100 findings on this tree, and 3,279 of those
+# are UP006 (`List[x]` -> `list[x]`). Turning those on would produce a 122-file
+# diff of pure churn and bury the handful of findings that describe real defects.
+# So this file selects only rule families that catch bugs, not style.
+#
+# Widen it deliberately if you want to, but do the mechanical migration in its
+# own commit — never mixed into a behavior change.
+
+target-version = "py311"  # matches the floor CI tests against
+line-length = 100
+
+[lint]
+# E9  — syntax / IO errors that stop the file being parsed at all.
+# F   — pyflakes: undefined names, unused imports and variables. This overlaps
+#       tests/test_static_undefined_names.py, which shells out to pyflakes for
+#       the same class of finding; ruff is the faster path and could replace it.
+# B   — flake8-bugbear: genuine bug patterns. B023 (closure captures a loop
+#       variable) currently flags 6 real sites in src/server.py.
+select = ["E9", "F", "B"]
+
+ignore = [
+    # F405 — "may be undefined, or defined from star imports". 1,706 hits, all
+    # downstream of the `import *` style this codebase uses on purpose. Flagging
+    # every consumer of a star-imported name is noise, not a defect report.
+    "F405",
+]
+
+[lint.per-file-ignores]
+# Tests lean on star imports, fixtures bound but unused, and deliberately odd
+# constructs to exercise error paths.
+"tests/**" = ["F403", "F401", "B011"]
+
+[format]
+# Not enabled in CI. The tree has never been auto-formatted, so running the
+# formatter would rewrite essentially every file. Left configured but unused so
+# the decision stays explicit.
+quote-style = "preserve"

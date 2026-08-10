@@ -1,0 +1,83 @@
+name: Tests
+
+# npm-publish.yml only fires on `v*` tags, so until this file existed nothing ran
+# on an ordinary push or pull request. The six unittest modules named in that
+# workflow are drift guards gating a release — they are not the test suite. The
+# suite is 2,400+ tests and completes in well under a minute, so there is no
+# reason not to run all of it on every change.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.11 is the floor npm-publish.yml validates against; 3.12 is what the
+        # local venv uses. Both are tested so a change cannot pass on one and
+        # break the other silently.
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install ffmpeg
+        # Not optional. Without ffmpeg on PATH, five tests across
+        # test_edit_engine, test_media_analysis and test_sync_detection fail
+        # outright rather than skipping, and a further 28 skip that should run.
+        # Two of the five mock the silence-detection call and still fail, because
+        # a capability precheck runs before the mock is reached.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg
+          ffmpeg -version | head -1
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Run test suite
+        run: python -m pytest tests/ -q --tb=short
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install ruff
+        run: pip install ruff
+
+      - name: Run ruff
+        # Advisory, not blocking. ruff.toml selects only bug-shaped rules (E9, F,
+        # B) and still reports 116 pre-existing findings, so making this required
+        # today would mean every PR lands red through no fault of its author.
+        # Burn the backlog down — the 6 B023 hits in src/server.py are real
+        # closure-over-loop-variable bugs and are the place to start — then drop
+        # this line to make lint gating.
+        continue-on-error: true
+        run: ruff check src/ scripts/ --output-format=github
