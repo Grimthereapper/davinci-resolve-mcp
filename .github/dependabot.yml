@@ -1,0 +1,46 @@
+# Dependency updates.
+#
+# The reason this file exists is in requirements.txt: `mcp[cli]>=1.29,<2` is
+# pinned because 2.0.0 restructured the SDK away from `mcp.server.fastmcp`, which
+# src/server.py imports. That break was found by hand, after the fact. A weekly PR
+# that fails CI is a cheaper way to learn the same thing.
+#
+# Grouped so a quiet week produces one or two PRs rather than a dozen, and
+# limited so a noisy one cannot bury the queue.
+
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+    groups:
+      npm-minor-and-patch:
+        update-types: ["minor", "patch"]
+
+  - package-ecosystem: npm
+    # The advanced offline server keeps its own lockfile and its own deps,
+    # including the optional native ones (better-sqlite3, sharp).
+    directory: /resolve-advanced
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+    groups:
+      npm-minor-and-patch:
+        update-types: ["minor", "patch"]
+
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+    groups:
+      python-minor-and-patch:
+        update-types: ["minor", "patch"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 2

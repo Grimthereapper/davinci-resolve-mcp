@@ -57,6 +57,56 @@ jobs:
       - name: Run test suite
         run: python -m pytest tests/ -q --tb=short
 
+  node:
+    # The advanced (offline) server had no CI at all: npm-publish.yml runs six
+    # Python smoke modules on a tag, and the pytest job above never enters
+    # resolve-advanced/. That left 83 test files — the .drp/.drt/.drx editing
+    # paths, which are the ones that can corrupt a project — running only on
+    # whatever machine happened to type `npm test`.
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: resolve-advanced
+    strategy:
+      fail-fast: false
+      matrix:
+        # 22 is the floor that the optional native dep installs on, and is the
+        # only leg where the sqlite-backed tests actually execute. 26 is what the
+        # maintainer's machine runs, so a Node-version regression shows up here
+        # rather than in a grading session.
+        node-version: ["22", "26"]
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up Node ${{ matrix.node-version }}
+        uses: actions/setup-node@v5
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+          cache-dependency-path: resolve-advanced/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Assert better-sqlite3 is present on the floor version
+        # npm treats an optionalDependency that fails to install as success and
+        # says nothing. Without this, the 27 sqlite-backed tests would skip on
+        # every leg and the suite would still be green — a silent loss of the
+        # lineage, conform and Project.db coverage. On Node 26 the optional dep
+        # genuinely cannot build (better-sqlite3 ^11 predates that ABI), so the
+        # check is pinned to the floor version rather than the whole matrix.
+        if: matrix.node-version == '22'
+        run: |
+          node -e "require('better-sqlite3'); console.log('better-sqlite3 loaded')" || {
+            echo "::error::better-sqlite3 did not install. The sqlite-backed tests would silently skip."
+            exit 1
+          }
+
+      - name: Run test suite
+        run: npm test
+
   lint:
     runs-on: ubuntu-latest
     steps:
