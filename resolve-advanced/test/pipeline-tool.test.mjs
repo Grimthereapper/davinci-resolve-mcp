@@ -11,6 +11,7 @@ import { createRequire } from 'node:module';
 import { pipelineTool } from '../server/tools/pipeline.mjs';
 
 const require = createRequire(import.meta.url);
+import { SQLITE_MISSING } from './_optional-deps.mjs';
 const sharp = require('sharp');
 const T = '2026-06-29T00:00:00Z';
 const call = (action, args) => pipelineTool.handler({ action, args });
@@ -22,7 +23,7 @@ async function midGray(file) {
     .toFile(file);
 }
 
-test('pipeline tool: compile → plan → execute real deterministic stage → readback', async () => {
+test('pipeline tool: compile → plan → execute real deterministic stage → readback', { skip: SQLITE_MISSING }, async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ptool-'));
   const dbPath = path.join(dir, 'project.db');
   const frame = path.join(dir, 'f.png');

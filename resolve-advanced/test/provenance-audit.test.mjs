@@ -25,6 +25,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
+import { SQLITE_MISSING } from './_optional-deps.mjs';
 const sharp = require('sharp');
 
 test('gallery_lineage validates labels, assigns next version, plans a TIFF export of approved', () => {
@@ -136,7 +137,7 @@ test('episode_report renders a structured + markdown readback', () => {
   assert.match(rep.markdown, /EP012_textless: FAIL/);
 });
 
-test('stage resume: rerunStage resets a stage + downstream back to pending', async () => {
+test('stage resume: rerunStage resets a stage + downstream back to pending', { skip: SQLITE_MISSING }, async () => {
   const T = '2026-07-06T00:00:00Z';
   const db = openProjectDb(path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'rr-')), 'p.db'));
   compileSpecs(db, [{ slug: 'ep', kind: 'episode', config: { pipeline: ['leveling', 'qc'] } }], { now: T });

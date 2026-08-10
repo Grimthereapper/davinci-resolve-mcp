@@ -12,6 +12,7 @@ import fs from 'node:fs';
 
 import { ingestXml } from '../server/lineage-db.mjs';
 import { classifyCut, markerCategory, qcSnapshot, propagateVerdicts, markerPlan, referenceIsBlank } from '../server/qc-frame.mjs';
+import { SQLITE_MISSING } from './_optional-deps.mjs';
 
 const W = 40,
   H = 30;
@@ -91,7 +92,7 @@ function samplers(badRecord = 48) {
   };
 }
 
-test('qcSnapshot: classifies all cuts, caches, and is incremental on re-run', async () => {
+test('qcSnapshot: classifies all cuts, caches, and is incremental on re-run', { skip: SQLITE_MISSING }, async () => {
   const db = tmpDb();
   const snap = ingestXml(db, writeXml(xmeml()), { reel: 'R01', label: 'OG', now: 't' });
   const opts = {
@@ -114,7 +115,7 @@ test('qcSnapshot: classifies all cuts, caches, and is incremental on re-run', as
   assert.equal(r2.scanned, 0);
 });
 
-test('qcSnapshot: a black reference → REF_OFFLINE (not a false WRONG) even when the source has picture', async () => {
+test('qcSnapshot: a black reference → REF_OFFLINE (not a false WRONG) even when the source has picture', { skip: SQLITE_MISSING }, async () => {
   const db = tmpDb();
   const snap = ingestXml(db, writeXml(xmeml()), { reel: 'R01', label: 'OG', now: 't' });
   // cut 1 (record 48): reference is BLACK (shot offline in editorial) but the source DOES have picture
@@ -143,7 +144,7 @@ test('qcSnapshot: a black reference → REF_OFFLINE (not a false WRONG) even whe
   assert.equal(plan[0].record_start, 48);
 });
 
-test('propagateVerdicts: unchanged cuts carry over; changed cuts must re-QC', async () => {
+test('propagateVerdicts: unchanged cuts carry over; changed cuts must re-QC', { skip: SQLITE_MISSING }, async () => {
   const db = tmpDb();
   const parent = ingestXml(db, writeXml(xmeml({ in1: 100 })), { reel: 'R01', label: 'v1', now: 'a' });
   await qcSnapshot(db, parent.snapshotId, { referenceRef: 'ref.mov', width: W, height: H, now: 'a', ...samplers() });
@@ -154,7 +155,7 @@ test('propagateVerdicts: unchanged cuts carry over; changed cuts must re-QC', as
   assert.deepEqual(prop.mustReQC, [0]); // record_start 0 (clip A) changed
 });
 
-test('markerPlan: emits red/yellow markers from verdicts (skips ok)', async () => {
+test('markerPlan: emits red/yellow markers from verdicts (skips ok)', { skip: SQLITE_MISSING }, async () => {
   const db = tmpDb();
   const snap = ingestXml(db, writeXml(xmeml()), { reel: 'R01', now: 't' });
   await qcSnapshot(db, snap.snapshotId, {

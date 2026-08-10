@@ -16,6 +16,7 @@ import { locateReverseClip, writeReverseClip, calibrateK, inForTarget } from '..
 import { conformTool } from '../server/tools/conform.mjs';
 
 const require = createRequire(import.meta.url);
+import { SQLITE_MISSING } from './_optional-deps.mjs';
 
 test('calibration math: K = probeIn + displayed; In = K - target', () => {
   const K = calibrateK(12419, 35427); // 47846
@@ -47,7 +48,7 @@ function makeSqliteDb() {
   return p;
 }
 
-test('sqlite: locate scoping excludes other timelines/tracks', async () => {
+test('sqlite: locate scoping excludes other timelines/tracks', { skip: SQLITE_MISSING }, async () => {
   const projectDb = makeSqliteDb();
   const r = await locateReverseClip({ projectDb, timelineId: 'tl1', mediaPathContains: 'A01-A03' });
   // tl1 -> seqA -> trk1 -> item1 only (item2 trkX has no track row; itemOther is seqB)
@@ -58,7 +59,7 @@ test('sqlite: locate scoping excludes other timelines/tracks', async () => {
   assert.ok(r.blobSource && r.blobSource.id === 'item2' && r.blobSource.tmlen === 660);
 });
 
-test('sqlite: fix restores the reverse blob + sets In, with backup', async () => {
+test('sqlite: fix restores the reverse blob + sets In, with backup', { skip: SQLITE_MISSING }, async () => {
   const projectDb = makeSqliteDb();
   const res = await writeReverseClip({
     projectDb,
@@ -75,12 +76,12 @@ test('sqlite: fix restores the reverse blob + sets In, with backup', async () =>
   assert.match(bak, /^35414~~/);
 });
 
-test('sqlite: write refuses without iConfirmProjectClosed', async () => {
+test('sqlite: write refuses without iConfirmProjectClosed', { skip: SQLITE_MISSING }, async () => {
   const projectDb = makeSqliteDb();
   await assert.rejects(() => writeReverseClip({ projectDb, itemId: 'item1', setIn: '12419' }), /close the project/i);
 });
 
-test('conform tool: locate then fix (probe → calibrate → apply) over SQLite', async () => {
+test('conform tool: locate then fix (probe → calibrate → apply) over SQLite', { skip: SQLITE_MISSING }, async () => {
   const projectDb = makeSqliteDb();
   // locate
   const loc = await conformTool.handler({ action: 'fix_reverse_clip', args: { projectDb, timelineId: 'tl1', mediaPathContains: 'A01-A03', mode: 'locate' } });

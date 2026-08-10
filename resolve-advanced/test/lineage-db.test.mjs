@@ -14,6 +14,7 @@ import { createRequire } from 'node:module';
 import { openStore, ingestXml, ingestLiveTimeline, listSnapshots, getSnapshot, diffSnapshots, rollbackPlan } from '../server/lineage-db.mjs';
 
 const require2 = createRequire(import.meta.url);
+import { SQLITE_MISSING } from './_optional-deps.mjs';
 // A tiny SQLite "project DB" with one timeline: a forward clip + a reversed clip.
 function makeProjectDb() {
   const Database = require2('better-sqlite3');
@@ -61,7 +62,7 @@ function writeXml(s) {
   return p;
 }
 
-test('ingest derives oracle frames + scale, hashes, stores cuts', () => {
+test('ingest derives oracle frames + scale, hashes, stores cuts', { skip: SQLITE_MISSING }, () => {
   const db = tmpDb();
   const r = ingestXml(db, writeXml(xmeml()), { reel: 'R01', label: 'OG', kind: 'editorial_xml', now: '2026-01-01T00:00:00Z' });
   assert.equal(r.deduped, false);
@@ -82,7 +83,7 @@ test('ingest derives oracle frames + scale, hashes, stores cuts', () => {
   assert.ok(a.cut_hash && b.cut_hash && a.cut_hash !== b.cut_hash);
 });
 
-test('reverse oracle frame is derived when mediaFrames supplied', () => {
+test('reverse oracle frame is derived when mediaFrames supplied', { skip: SQLITE_MISSING }, () => {
   const db = tmpDb();
   const r = ingestXml(db, writeXml(xmeml()), { reel: 'R01', mediaFrames: { 'B.mov': 47849 }, now: 't' });
   const b = getSnapshot(db, r.snapshotId).cuts[1];
@@ -90,7 +91,7 @@ test('reverse oracle frame is derived when mediaFrames supplied', () => {
   assert.equal(b.oracle_source_frame, 35427);
 });
 
-test('identical content dedups; an edited cut produces a new snapshot', () => {
+test('identical content dedups; an edited cut produces a new snapshot', { skip: SQLITE_MISSING }, () => {
   const db = tmpDb();
   const first = ingestXml(db, writeXml(xmeml()), { reel: 'R01', label: 'v01', now: 'a' });
   const same = ingestXml(db, writeXml(xmeml()), { reel: 'R01', label: 'v02', now: 'b' });
@@ -103,7 +104,7 @@ test('identical content dedups; an edited cut produces a new snapshot', () => {
   assert.equal(listSnapshots(db, { reel: 'R01' }).length, 2); // OG-content + edited
 });
 
-test('store survives reopen (persistent sidecar)', () => {
+test('store survives reopen (persistent sidecar)', { skip: SQLITE_MISSING }, () => {
   const db = tmpDb();
   const r = ingestXml(db, writeXml(xmeml()), { reel: 'R02', now: 'x' });
   // reopen a fresh handle
@@ -111,7 +112,7 @@ test('store survives reopen (persistent sidecar)', () => {
   assert.equal(getSnapshot(db, r.snapshotId).cuts.length, 2);
 });
 
-test('diff: self-diff is identical, all unchanged', () => {
+test('diff: self-diff is identical, all unchanged', { skip: SQLITE_MISSING }, () => {
   const db = tmpDb();
   const r = ingestXml(db, writeXml(xmeml()), { reel: 'R01', now: 'a' });
   const d = diffSnapshots(db, r.snapshotId, r.snapshotId);
@@ -119,7 +120,7 @@ test('diff: self-diff is identical, all unchanged', () => {
   assert.deepEqual(d.summary, { unchanged: 2, changed: 0, added: 0, removed: 0, moved: 0 });
 });
 
-test('diff: an edited source frame shows as a source_frame change', () => {
+test('diff: an edited source frame shows as a source_frame change', { skip: SQLITE_MISSING }, () => {
   const db = tmpDb();
   const og = ingestXml(db, writeXml(xmeml({ in1: 100 })), { reel: 'R01', label: 'OG', now: 'a' });
   const ed = ingestXml(db, writeXml(xmeml({ in1: 200 })), { reel: 'R01', label: 'v2', now: 'b' });
@@ -131,7 +132,7 @@ test('diff: an edited source frame shows as a source_frame change', () => {
   assert.deepEqual(d.changed[0].deltas.oracle_source_frame, { from: 100, to: 200 });
 });
 
-test('live ingest: reads cuts from a project DB, detects reverse, uses API readbacks', async () => {
+test('live ingest: reads cuts from a project DB, detects reverse, uses API readbacks', { skip: SQLITE_MISSING }, async () => {
   const lineage = tmpDb();
   const project = makeProjectDb();
   const r = await ingestLiveTimeline(lineage, {
@@ -152,7 +153,7 @@ test('live ingest: reads cuts from a project DB, detects reverse, uses API readb
   assert.equal(b.oracle_source_frame, 35427); // from the API readback, not the mirrored stored In (12420)
 });
 
-test('cross-kind diff (XML vs live) flags a reverted reverse frame', async () => {
+test('cross-kind diff (XML vs live) flags a reverted reverse frame', { skip: SQLITE_MISSING }, async () => {
   const lineage = tmpDb();
   const project = makeProjectDb();
   // XML baseline: reverse clip B should display 35427 (oracle via mediaFrames)
@@ -166,7 +167,7 @@ test('cross-kind diff (XML vs live) flags a reverted reverse frame', async () =>
   assert.deepEqual(bChange.deltas.oracle_source_frame, { from: 35427, to: 12420 });
 });
 
-test('rollbackPlan: how to get a wrong live state back to the good XML target', async () => {
+test('rollbackPlan: how to get a wrong live state back to the good XML target', { skip: SQLITE_MISSING }, async () => {
   const lineage = tmpDb();
   const project = makeProjectDb();
   const good = ingestXml(lineage, writeXml(xmeml()), { reel: 'R01', label: 'OG', mediaFrames: { 'B.mov': 47849 }, now: 'a' });
@@ -190,7 +191,7 @@ test('rollbackPlan: how to get a wrong live state back to the good XML target', 
   assert.ok(fixAction && fixAction.targetFrame === 35427 && fixAction.reverse === true);
 });
 
-test('diff: a clip that moves record position is reported as moved', () => {
+test('diff: a clip that moves record position is reported as moved', { skip: SQLITE_MISSING }, () => {
   const db = tmpDb();
   const og = ingestXml(db, writeXml(xmeml({ bStart: 48 })), { reel: 'R01', label: 'OG', now: 'a' });
   const mv = ingestXml(db, writeXml(xmeml({ bStart: 60 })), { reel: 'R01', label: 'mv', now: 'b' });

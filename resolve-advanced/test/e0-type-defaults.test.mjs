@@ -12,6 +12,7 @@ import path from 'node:path';
 import { openProjectDb, getEntity } from '../server/project-db.mjs';
 import { loadYamlDir, compileSpecs } from '../server/spec-compile.mjs';
 import { planRun } from '../server/runner.mjs';
+import { SQLITE_MISSING } from './_optional-deps.mjs';
 
 const T = '2026-06-29T00:00:00Z';
 
@@ -57,7 +58,7 @@ type: doc-iv
 guest: TestGuest
 `;
 
-test('E0: type-default blocks compile via inheritance and drive a runnable plan', () => {
+test('E0: type-default blocks compile via inheritance and drive a runnable plan', { skip: SQLITE_MISSING }, () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'e0-'));
   fs.mkdirSync(path.join(dir, '_types'));
   fs.writeFileSync(path.join(dir, '_types', 'doc-iv.yml'), TYPE_YML);

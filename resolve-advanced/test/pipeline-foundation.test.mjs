@@ -15,12 +15,13 @@ import { recordReadback, detectDrift, reconcile, driftReport } from '../server/r
 import { CATALOG, getDescriptor, listCatalog, STAGE_PLAN } from '../server/tool-catalog.mjs';
 import { planRun, executeStage, runAll, approveGate, markStageApplied } from '../server/runner.mjs';
 import { getRun } from '../server/project-db.mjs';
+import { SQLITE_MISSING } from './_optional-deps.mjs';
 
 const T = '2026-06-29T00:00:00Z';
 const tmpDb = () => path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'pdb-')), 'project.db');
 
 // ── A1: canonical DB ───────────────────────────────────────────────────────────
-test('A1: entities upsert, hierarchy ancestry, idempotent upsert', () => {
+test('A1: entities upsert, hierarchy ancestry, idempotent upsert', { skip: SQLITE_MISSING }, () => {
   const db = openProjectDb(tmpDb());
   upsertEntity(db, { slug: 'doc-interview', kind: 'type', resolved: { color: { science: 'acescct' } }, now: T });
   upsertEntity(db, { slug: 'demo-series', kind: 'series', parentSlug: 'doc-interview', resolved: {}, now: T });
@@ -42,7 +43,7 @@ test('A2: deepMerge — override, deep-merge, list replace, +append', () => {
   assert.deepEqual(deepMerge({ l: [1, 2] }, { '+l': [3] }).l, [1, 2, 3], '+key appends');
 });
 
-test('A2: compileSpecs resolves type→series→episode and writes resolved rows', () => {
+test('A2: compileSpecs resolves type→series→episode and writes resolved rows', { skip: SQLITE_MISSING }, () => {
   const db = openProjectDb(tmpDb());
   const specs = [
     { slug: 'doc-interview', kind: 'type', config: { color: { science: 'acescct', odt: 'Rec.709' }, node_model: 'log' } },
@@ -64,7 +65,7 @@ test('A2: compileSpecs resolves type→series→episode and writes resolved rows
   db.close();
 });
 
-test('A2: deliverable inherits a sibling deliverable', () => {
+test('A2: deliverable inherits a sibling deliverable', { skip: SQLITE_MISSING }, () => {
   const db = openProjectDb(tmpDb());
   compileSpecs(
     db,
@@ -108,7 +109,7 @@ test('A2: loadYamlDir reads files; deliverables stay in config (inheritance-frie
 });
 
 // ── A3: readback + drift ─────────────────────────────────────────────────────────
-test('A3: recordReadback + detectDrift flags mismatch, matches equal', () => {
+test('A3: recordReadback + detectDrift flags mismatch, matches equal', { skip: SQLITE_MISSING }, () => {
   const db = openProjectDb(tmpDb());
   upsertEntity(db, { slug: 'g.host', kind: 'group', resolved: { look: { lut: 'Kodak_5219' }, color: { science: 'acescct' } }, now: T });
   recordReadback(db, 'g.host', { 'color.science': 'acescct', 'look.lut': 'WRONG_LUT' }, { source: 'route_a', now: T });
@@ -121,7 +122,7 @@ test('A3: recordReadback + detectDrift flags mismatch, matches equal', () => {
   db.close();
 });
 
-test('A3: reconcile writes facts + returns drift in one call', () => {
+test('A3: reconcile writes facts + returns drift in one call', { skip: SQLITE_MISSING }, () => {
   const db = openProjectDb(tmpDb());
   upsertEntity(db, { slug: 'seq.main', kind: 'sequence', resolved: { clip_count: 305 }, now: T });
   const r = reconcile(db, 'seq.main', { facts: { clip_count: 304 }, pushFields: [{ field: 'clip_count' }], source: 'live', now: T });
@@ -145,7 +146,7 @@ test('B0: catalog descriptors are valid + routable; stage map covers pipeline st
 });
 
 // ── B1 + B2: plan, run, gates, resolve boundary, end-to-end ──────────────────────
-test('B2: end-to-end — compile, plan, run deterministic stage, gate, resolve boundary, readback', async () => {
+test('B2: end-to-end — compile, plan, run deterministic stage, gate, resolve boundary, readback', { skip: SQLITE_MISSING }, async () => {
   const db = openProjectDb(tmpDb());
   compileSpecs(
     db,
