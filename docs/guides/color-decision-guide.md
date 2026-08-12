@@ -125,6 +125,225 @@ If a requested look requires secondaries, windows, curves, texture, or selective
 relighting, say so. A CDL can suggest the direction, but it is not a substitute
 for a full interactive color pass.
 
+## Read The Cast By Tonal Band, Not As One Number
+
+A whole-frame RGB average tells you *that* a shot is warm. It does not tell you
+*where* the warmth lives, and the fix is different for each answer:
+
+| Where the cast sits | What it is | Wheel that moves it |
+|---|---|---|
+| Shadows only | black-balance / lift problem | Lift (or Offset) |
+| Grows with brightness | white-balance / gain problem | Gain |
+| Same at both ends | global balance | Offset |
+| Opposite at the two ends | a deliberate split tone — **do not neutralize** | nothing |
+
+`scope_read` returns this directly: `paradeBands.{low,mid,high}` measures each
+band separately at fixed luma thresholds (so band `low` on shot A is the same
+tonal region as band `low` on shot B), and `bandDiagnosis` names the locus, the
+shape, and the wheel to reach for first. A band holding under 2% of the frame
+comes back `sparse: true` — read it, do not act on it, because a night exterior's
+highlight band is three specular dots.
+
+The whole-frame parade is blind to split toning: cool shadows and warm highlights
+cancel and `parade.rb` returns near zero. That is why `shot_intent` tags
+`split_toned` off the band split and adds it to the neutralize-exclusion set — a
+gray-world pass would otherwise flatten a look somebody built on purpose.
+
+**Matching order that follows from this:** settle exposure and contrast on both
+shots *first* — saturation rises as exposure falls and washes out as it climbs,
+so colour cannot be matched across an exposure mismatch. Then match the brightest
+populated band, then the mids, then the shadows. The lows usually land on their
+own once the two above them agree.
+
+**Measure the recurring object, not the frame.** Two shots of the same scene hold
+different amounts of sky, foliage and wall, so their frame averages differ even
+when they cut perfectly. Pick something that appears in both — a coat, a wall, a
+face — and measure `scope_read` with a `rect` over that. On a measured
+three-shot example, whole-frame numbers were ambiguous while the same garment
+measured 85 levels of R−B apart before matching and 13 after.
+
+**Matching means agreeing on a cast, not removing it.** In that same example the
+matched shots did not land on neutral — all three sat between R−B −18 and −29,
+consistently cool. The unmatched version was the one that *wandered across*
+neutral (−73, −13, +12). A matcher that drives every shot to zero is solving the
+wrong problem; the target is agreement, and the anchor shot defines where.
+
+**Saturation is the third axis and the one that gets forgotten.** In the same
+comparison, mean saturation ranged 0.134–0.363 across the unmatched shots and
+0.158–0.199 across the matched ones. Exposure and hue can both agree while a
+shot still pops out of the cut on chroma alone. Check `meanSat` spread with the
+same discipline as `rb` spread.
+
+## Look And Grade Are Separate Disciplines
+
+A **look** is a macro-level transform: it is the same on every shot in the
+project, and it is built *without reference to any one shot*. A **grade** is
+per-shot. Confusing them is the most common structural mistake in a colour
+pipeline, and it has concrete consequences:
+
+- **A look must not move middle exposure.** If it does, every shot arrives at the
+  grade already biased and the colorist is correcting the look instead of the
+  image. Split tones and contrast curves in a look should be anchored at the
+  working space's mid-gray so they shape the ends without shifting the middle.
+- **Validate a look on the outliers, never on the hero.** A look that only works
+  on the shot it was built on is not a look. Test it on the blown window, the
+  night exterior, and the underexposed one before adopting it.
+  **A look breaks in the tonal band its test frames never populated** — one built
+  and judged on a bright mid-key shot has simply never been evaluated below that
+  shot's black point, and the first dark interior is where the untested shadow
+  mapping shows up as a hard cast. `look_coverage` checks exactly this: hand it
+  the frames the look was judged on and it names the band nothing in the set
+  reached. It reports coverage of the evidence, not quality of the look.
+- **A look that keeps needing the same compensation is wrong.** If you find
+  yourself pulling contrast back on shot after shot, the look has too much
+  contrast — fix it once at the look level rather than forty times at the shot
+  level. Treat any repeated per-shot correction as a bug report against the look.
+- **Exposure is a creative parameter, contrast is a ratio to maintain.** At the
+  shot level you are usually keeping the look's contrast ratio on the road, not
+  building contrast from scratch.
+
+Use a *photometric* control for exposure — one that scales light without also
+changing contrast. Offset and Lift/Gamma/Gain both move contrast while you move
+exposure, which means every exposure decision needs a contrast decision to
+compensate, and you end up chasing your own tail. Set contrast with the pivot
+placed at the working space's mid-gray for the same reason: so the contrast move
+does not re-bias the exposure you just set.
+
+## Order Within The Node Graph
+
+The three-stage grouped pipeline is the structure that makes mixed-camera work
+tractable, and it maps onto the group graphs the `color_group` tool exposes:
+
+| Stage | Holds | Why there |
+|---|---|---|
+| Group Pre-Clip | input transform (per camera), noise reduction | one CST per *camera*, not per clip |
+| Clip | balance, contrast, secondaries, windows | the only per-shot stage |
+| Group Post-Clip / Timeline | creative look, film texture, output transform | one look for everything |
+
+Two rules that fail silently when broken:
+
+- **Noise reduction goes early** — directly after the input transform, before any
+  creative grade, LUT, sharpening or grain. Applied late it eats the texture the
+  grade just built; applied heavily it produces the plastic skin that reads as
+  amateur.
+- **Everything corrective sits upstream of the display/print transform.** A trim
+  appended after the transform is fighting the emulation rather than feeding it,
+  and the same numeric move produces a different, usually worse, result.
+
+Getting the input transform right is worth more than any amount of wheel-work:
+two clips in different colour spaces cannot be matched by eye without fighting
+the maths. If a grouped camera still needs individual correction on most of its
+clips after a group-level match, suspect the transform before suspecting the
+grade.
+
+## Skin: Hue Is The Target, Saturation And Luminance Are Not
+
+The vectorscope skin-tone line is a **hue** reference. Every skin colour sits on
+or near the same hue vector; what differs between people is saturation and
+distance from centre, not angle. Two failure modes follow:
+
+- Pulling every face *onto* the line at the same distance desaturates darker skin
+  and makes everyone look like the same plastic person. Match the hue angle, let
+  the magnitude differ.
+- Landing on the wrong side of the line reads immediately as illness — slightly
+  toward red is acceptable, past it toward green is not.
+
+Isolate skin before pushing a strong look through the frame. The working
+arrangement is a qualifier node for skin whose **key output** feeds a layer mixer
+placed after the creative grade — the skin correction composites *over* the look,
+so a teal-and-orange push never lands on faces. Two things decide whether it
+works: the qualifier's **invert** state (get it backwards and you have protected
+the background instead of the face — check the matte, not the result), and the
+key's **output gain**, which blends the protected skin back toward the graded
+frame when it reads too clean against it. Blend it back rather than weakening the
+look.
+
+## Corrections That Move
+
+A shot where the light changes mid-take cannot be fixed with a static
+correction. Three options, in increasing cost:
+
+1. **Colour Stabilizer** for gradual drift (aperture ramps, a cloud crossing).
+   Grade the shot to a good state first — it analyses the corrected image, and
+   the manual warns against running it on clipped highlights. Restrict the region
+   of analysis to the area that actually drifts; whole-frame analysis fails when
+   foreground and sky are at very different exposures. Use Offset mode in a
+   display-referred space, Gain in a camera/log space, and deselect white balance
+   if only brightness is moving.
+2. **Keyframes** for anything abrupt — a stabilizer cannot follow a step change.
+3. **A keyframed window** when only part of the frame changes.
+
+The fourth option is legitimate and underused: some shots should be recut rather
+than graded. Say so rather than spending an hour on a shot the edit can lose.
+
+## Masks: Take The Cheapest Rung That Works
+
+Reaching for the most powerful tool first is the main cause of slow secondary
+work. In ascending cost:
+
+1. **Curves** (Hue vs Hue, Hue vs Sat, Sat vs Lum) — instant, no tracking, no
+   edges to fail. Try first, always.
+2. **HSL qualifier** — when colour separates the subject. Needs clean separation
+   and usually blur/denoise on the key to behave.
+3. **Power window + tracker** — when *geometry*, not colour, separates the subject.
+4. **AI mask (Magic Mask)** — people and objects. Powerful and slow; last resort.
+
+Before escalating a failing key, try Matte Finesse — denoise, blur, shrink — on
+the key you already have. A mask that needs rescuing is usually cheaper to clean
+than to rebuild.
+
+## LUT Versus Reusable Grade
+
+A node-graph grade (PowerGrade/`.drx`) stays editable and adapts. A baked LUT is
+a fixed table that assumes a specific input state, clips outside it, and cannot
+respond to exposure. Both have a place; confusing them produces a look library
+nobody trusts.
+
+If you generate a LUT:
+
+- **Build it on a spread of shots** — outdoor, tungsten interior, mixed, and one
+  with saturated magentas — not on a single hero frame, and work at the timeline
+  level so every edit is judged against all of them at once.
+- **Only per-pixel colour operations survive the bake.** Curves, contrast,
+  saturation and hue remaps carry. Qualifiers, windows, tracking, sharpening and
+  grain do not — anything that depends on *where in the frame* a pixel is cannot
+  be expressed as a colour→colour table.
+- **Exclude the transform nodes** from the export unless the LUT is meant to
+  carry them, and document the exact input state the LUT expects.
+- **Choose the point count deliberately** — a denser cube for 4K and for heavy
+  transforms, since interpolation error between lattice points is what shows up
+  as banding.
+
+Every LUT handed to someone else is a support obligation. Prefer shipping an
+editable grade internally and reserving LUTs for outside collaborators and
+on-set monitoring.
+
+## Reference Matching Has A Ceiling
+
+You cannot copy a look off a reference frame; you can only reverse-engineer it,
+and often what is admired in the reference is its **lighting**, which no grade
+will supply. Before matching, state which it is.
+
+Analyse a reference deliberately rather than eyeballing it: black level,
+highlight roll-off shape, shadow hue, skin saturation relative to the rest of the
+frame, and where the contrast sits. `match_to_reference` performs the affine part
+of this; it cannot supply contrast shape or lighting, and it will happily match
+the *framing* rather than the light when the two frames hold different content
+(a wide and a close-up of the same scene have different colour populations).
+Check the result on faces before accepting it.
+
+A grade that lands close for the wrong stated reasons should be treated as a
+failure, not a success — the analysis is what transfers to the next shot.
+
+## Delivery: The Washed-Out Export Is A Tag, Not A Grade
+
+An export that looks correct in Resolve and washed out after upload is almost
+always a colour-tag/gamma-tag mismatch, not a grading error. Check the tags on
+the render before re-grading anything: the deliverable carries a colour space tag
+and a gamma tag independently of the pixels, and a player that reads a different
+gamma tag than the one the grade was judged under will shift the blacks. Confirm
+against the actual rendered file rather than the timeline.
+
 ## What CDL Is Good For
 
 CDL is the main procedural correction surface available to the MCP. Use it for

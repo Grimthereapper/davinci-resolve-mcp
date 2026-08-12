@@ -40,6 +40,7 @@ import { computeBlackBalance } from '../black-balance.mjs';
 import { authorLook, carryLook } from '../season-look.mjs';
 import { applyLut } from '../lut-apply.mjs';
 import { computeToneCurveTransfer } from '../tone-curve-transfer.mjs';
+import { assessLookCoverage } from '../look-coverage.mjs';
 
 const levelSchema = z.object({
   clips: z
@@ -205,6 +206,11 @@ const scopeReadSchema = z.object({
   png: z.string().describe('Display-referred PNG to read (Rec.709/sRGB)'),
   rect: rectSchema.optional().describe('Optional measurement region (fractions 0..1)'),
   satBins: z.number().optional().describe('Saturation-histogram bin count (default 16)'),
+});
+
+const lookCoverageSchema = z.object({
+  pngs: z.array(z.string()).min(1).describe('The frames the look was judged on — the validation SET, not one hero frame'),
+  minFramesPerBand: z.number().optional().describe('Frames needed before a tonal band counts as covered (default 2)'),
 });
 
 const gradeRefSchema = z.object({ drxPath: z.string().optional(), content: z.string().optional() }).refine((a) => a.drxPath || a.content, { message: 'provide drxPath or content' });
@@ -645,7 +651,7 @@ export { computeValueFidelity, countKeyframedNodes, normalizeGradeParams, normal
 export const drxTool = {
   name: 'drx',
   description:
-    "DaVinci Resolve per-clip grade (.drx) codec — offline, no Resolve required. Actions: parse (decode node graph + qualifiers/curves/windows/OFX), generate (params → .drx), generate_from_request, export_cdl (→ ASC CDL/CCC), merge, level_clips, skin_match, shot_match, cdl_io (import ASC CDL→ .drx; export_cdl is the reverse), white_balance_match (neutral-patch WB), grade_transfer (lossless Body copy → apply-ready .drx), relayout (tidy node-graph LAYOUT only — rewrites node x/y to Resolve's clean row, grade content byte-preserved; live recipe: grab still → relayout → reset_all_grades → ApplyGradeFromDRX. The reset is REQUIRED: same-structure applies keep the existing layout, positions in the .drx are ignored), contrast_normalize (black/white-point match), gamut_legal (broadcast-legal/clip QC), scope_read (frame stats + colorist readouts: parade delta, vectorscope skin-line, black-balance, %clip/%crush + deterministic intent signals). parse/export_cdl include a `valueFidelity` marker — decoded values are exact only for the calibrated native control set (OFX/uncalibrated params are raw; keyframed grades flagged), so don't treat decoded values as ground truth. Structural WRITE paths live-verified 2026-07: power windows (incl. polygon/curve vertex shapes), HSL/RGB/luma qualifiers, HDR zones + zone DEFINITIONS (custom Max Range/falloff), ColorSlice, sat/lum-axis + hue-axis HSL curves (single- and multi-band canonical cage), blur/key/motionEffects palettes, LUT attach (lut_apply; .cube must be Resolve-resolvable, e.g. the LUT dir), and OFX plugin params (any pluginId; params are self-describing name/value pairs, enum strings are PER-PLUGIN vocabularies — use the ResolveFX registry/observed values). Still experimental to write: Color Warper on Resolve 19 (R21 wire format). See CALIBRATION-STATUS.md.",
+    "DaVinci Resolve per-clip grade (.drx) codec — offline, no Resolve required. Actions: parse (decode node graph + qualifiers/curves/windows/OFX), generate (params → .drx), generate_from_request, export_cdl (→ ASC CDL/CCC), merge, level_clips, skin_match, shot_match, cdl_io (import ASC CDL→ .drx; export_cdl is the reverse), white_balance_match (neutral-patch WB), grade_transfer (lossless Body copy → apply-ready .drx), relayout (tidy node-graph LAYOUT only — rewrites node x/y to Resolve's clean row, grade content byte-preserved; live recipe: grab still → relayout → reset_all_grades → ApplyGradeFromDRX. The reset is REQUIRED: same-structure applies keep the existing layout, positions in the .drx are ignored), contrast_normalize (black/white-point match), gamut_legal (broadcast-legal/clip QC), look_coverage (does a look's VALIDATION SET populate all three tonal bands? names the untested band — a look judged only on a bright hero is untested in the shadows, which is exactly where a badly-built look breaks), scope_read (frame stats + colorist readouts: whole-frame parade delta AND a band-limited parade — shadows/mids/highlights measured separately, each naming the wheel that moves it, plus a castLocus/castShape diagnosis that separates a shadow-only cast from one that grows with brightness and from a deliberate split tone; vectorscope skin-line, black-balance, %clip/%crush + deterministic intent signals). parse/export_cdl include a `valueFidelity` marker — decoded values are exact only for the calibrated native control set (OFX/uncalibrated params are raw; keyframed grades flagged), so don't treat decoded values as ground truth. Structural WRITE paths live-verified 2026-07: power windows (incl. polygon/curve vertex shapes), HSL/RGB/luma qualifiers, HDR zones + zone DEFINITIONS (custom Max Range/falloff), ColorSlice, sat/lum-axis + hue-axis HSL curves (single- and multi-band canonical cage), blur/key/motionEffects palettes, LUT attach (lut_apply; .cube must be Resolve-resolvable, e.g. the LUT dir), and OFX plugin params (any pluginId; params are self-describing name/value pairs, enum strings are PER-PLUGIN vocabularies — use the ResolveFX registry/observed values). Still experimental to write: Color Warper on Resolve 19 (R21 wire format). See CALIBRATION-STATUS.md.",
   async handler({ action, args }) {
     if (action === 'parse') {
       const p = parseSchema.parse(args);
@@ -912,6 +918,19 @@ export const drxTool = {
       const r = await scopeRead(p.png, { rect: p.rect, satBins: p.satBins });
       if (!r) throw new Error(`scope_read: unreadable frame '${p.png}' (skip-not-fake)`);
       return r;
+    }
+
+    if (action === 'look_coverage') {
+      const p = lookCoverageSchema.parse(args);
+      const frames = [];
+      const unreadable = [];
+      for (const png of p.pngs) {
+        const scope = await scopeRead(png);
+        if (scope) frames.push({ id: png, scope });
+        else unreadable.push(png); // skip-not-fake: a frame we cannot read is not coverage
+      }
+      const r = assessLookCoverage(frames, { minFramesPerBand: p.minFramesPerBand });
+      return unreadable.length ? { ...r, unreadable } : r;
     }
 
     if (action === 'verify_grade') {

@@ -39,6 +39,32 @@ test('a low-key frame is tagged low_key and excluded from neutralize', async () 
   assert.equal(shouldExcludeFromNeutralize(tags), true);
 });
 
+test('a split-toned frame is tagged and excluded even though the whole-frame parade reads neutral', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'intent-'));
+  const f = path.join(dir, 'split.png');
+  // teal shadows over warm highlights — the two casts cancel in the whole-frame mean
+  const w = 64;
+  const h = 64;
+  const buf = Buffer.alloc(w * h * 3);
+  for (let y = 0; y < h; y++) {
+    const c = y < h / 2 ? { r: 25, g: 45, b: 70 } : { r: 225, g: 190, b: 150 };
+    for (let x = 0; x < w; x++) {
+      const i = (y * w + x) * 3;
+      buf[i] = c.r;
+      buf[i + 1] = c.g;
+      buf[i + 2] = c.b;
+    }
+  }
+  await sharp(buf, { raw: { width: w, height: h, channels: 3 } })
+    .png()
+    .toFile(f);
+  const scope = await scopeRead(f);
+  const { tags } = deriveIntentTags(scope);
+  assert.ok(Math.abs(scope.parade.rb) < 25, `whole-frame R−B ${scope.parade.rb} hides the split`);
+  assert.ok(tagNames({ tags }).includes('split_toned'), tagNames({ tags }).join(','));
+  assert.equal(shouldExcludeFromNeutralize(tags), true, 'a deliberate split tone must survive a neutralize pass');
+});
+
 test('a warm frame is tagged motivated_warm; metadata WB raises confidence', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'intent-'));
   const f = path.join(dir, 'warm.png');

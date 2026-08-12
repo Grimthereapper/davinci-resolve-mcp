@@ -111,7 +111,7 @@ silent no-op):
 | `grade_transfer` | Lossless Body copy — a `.drp` group / `.drx` look → apply-ready `.drx`. |
 | `lut_apply` | Attach a named `.cube` LUT to a node (round-trip asserted). |
 | `author_look` / `carry_look` | Version and carry an approved season/host look. |
-| `scope_read` / `intent_tags` / `gamut_legal` | Read frames: parade/vectorscope/clip%, shot-intent tags, broadcast-legal QC. |
+| `scope_read` / `intent_tags` / `gamut_legal` | Read frames: parade (whole-frame + shadow/mid/highlight bands, with the wheel each band answers to), vectorscope/clip%, shot-intent tags, broadcast-legal QC. |
 | `verify_grade` | Intended vs applied `.drx` → landed/drifted/missing/unverifiable. |
 
 Cross-server rules an agent must know:

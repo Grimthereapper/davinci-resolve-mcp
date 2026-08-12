@@ -130,7 +130,8 @@ a silent no-op.
 | `relayout` | programmatic "Cleanup Node Graph" (the UI command has no API) — rewrite node x/y to Resolve's clean row, grade byte-preserved. Live recipe: grab → `relayout` → reset grade → apply (same-structure applies keep the old layout). Bulk whole-project sweep: `project_db` `relayout_node_graphs` |
 | `author_look` / `carry_look` | version an approved season/host look + plan carrying it across episodes |
 | `lut_apply` | attach a named `.cube` LUT to a node (Body-LUT write path, round-trip asserted) |
-| `scope_read` | frame readouts: parade balance, vectorscope skin-line, black-balance, %clip/%crush + intent signals |
+| `look_coverage` | is a look's validation set populating all three tonal bands? names the untested one |
+| `scope_read` | frame readouts: parade balance (whole-frame + shadow/mid/highlight bands + a castLocus/castShape diagnosis), vectorscope skin-line, black-balance, %clip/%crush + intent signals |
 | `intent_tags` | derive L1 shot-intent tags (low_key, monochromatic, motivated_warm) to exclude from neutralize |
 | `verify_grade` | intended vs applied `.drx` → landed/drifted/missing/unverifiable |
 | `extract_frames` | ffmpeg display-referred frame extraction (hard log-refuse) |
