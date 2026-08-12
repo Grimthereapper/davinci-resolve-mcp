@@ -6,8 +6,9 @@
  *   - per-channel {mean,min,max,p1,p50,p99} (the matchers consume the relevant stat)
  *   - luma stats (Rec.709 weighting)
  *   - a saturation histogram (HSV S) + mean saturation
- *   - COLORIST READOUTS a human acts on: RGB-parade balance delta, vectorscope skin-line
- *     angle/distance, per-channel black-balance point, %clip / %crush
+ *   - COLORIST READOUTS a human acts on: RGB-parade balance delta (whole-frame AND split into
+ *     shadow/mid/highlight bands), vectorscope skin-line angle/distance, per-channel
+ *     black-balance point, %clip / %crush
  *   - deterministic INTENT SIGNALS (L1): low-key? monochromatic? dominant hue? contrast?
  *     — these feed shot-intent tagging (shot-intent.mjs); the conversational L2 review is
  *     the CLIENT's job, never this tool's.
@@ -74,6 +75,26 @@ function hueOf(r, g, b) {
 // (one source of truth for "what is a skin pixel").
 import { isSkin } from './skin-match.mjs';
 
+// Tonal band edges (8-bit Rec.709 luma). Deliberately FIXED and absolute, not per-frame
+// percentiles: the point of a band readout is that band `low` on shot A is the same tonal
+// region as band `low` on shot B, so two frames can be compared band-for-band. Percentile
+// bands would move with the shot and make the comparison meaningless.
+const BAND_LO_HI = 85; // < 85  → shadows   (corrected with Lift / Offset)
+const BAND_MID_HI = 170; // 85..170 → midtones (corrected with Gamma)
+//                        >= 170 → highlights (corrected with Gain)
+
+// A band holding fewer than this fraction of the frame is not evidence — a night exterior
+// has almost no highlight pixels, and three stray specular dots must not steer a gain move.
+const BAND_MIN_FRAC = 0.02;
+
+// The wheel that moves each band. Named so a caller can act without re-deriving it.
+const BAND_WHEEL = { low: 'lift', mid: 'gamma', high: 'gain' };
+
+// Below this R−B (8-bit levels) a band is balanced, not cast. Without the floor the strongest
+// of three near-zero bands would still be named, i.e. a neutral frame would be handed a wheel
+// to reach for. "Nothing to correct" has to be an answer the diagnosis can give.
+const BAND_CAST_EPS = 4;
+
 /**
  * Read raw downsampled pixels from a PNG, optionally cropped to a fractional rect.
  * @returns {Promise<{data:Buffer, ch:number, width:number, height:number}|null>}
@@ -130,6 +151,12 @@ export async function scopeRead(pngPath, opts = {}) {
   const HUE_BUCKETS = 12;
   const hueMass = new Array(HUE_BUCKETS).fill(0);
   let nChromatic = 0;
+  // Per-band channel sums (the band-limited RGB parade — see BAND_LO_HI/BAND_MID_HI).
+  const bandSum = {
+    low: { r: 0, g: 0, b: 0, n: 0 },
+    mid: { r: 0, g: 0, b: 0, n: 0 },
+    high: { r: 0, g: 0, b: 0, n: 0 },
+  };
 
   let pi = 0;
   for (let i = 0; i < data.length; i += ch, pi++) {
@@ -141,6 +168,11 @@ export async function scopeRead(pngPath, opts = {}) {
     B[pi] = b;
     const y = lumaOf(r, g, b);
     L[pi] = y;
+    const band = y < BAND_LO_HI ? bandSum.low : y < BAND_MID_HI ? bandSum.mid : bandSum.high;
+    band.r += r;
+    band.g += g;
+    band.b += b;
+    band.n++;
     const s = satOf(r, g, b);
     satSum += s;
     satHist[clamp(Math.floor(s * satBins), 0, satBins - 1)]++;
@@ -182,6 +214,64 @@ export async function scopeRead(pngPath, opts = {}) {
     gb: +(channels.g.mean - channels.b.mean).toFixed(3),
     rb: +(channels.r.mean - channels.b.mean).toFixed(3),
     spread: +(Math.max(...means) - Math.min(...means)).toFixed(3),
+  };
+  // Band-limited RGB parade. The whole-frame `parade` above averages the shadows, mids and
+  // highlights into one number, which hides the thing you actually need: WHERE the cast is.
+  // A cast that lives only in the shadows is a black-balance problem; one that grows with
+  // brightness is a white-balance/gain problem. They take opposite fixes, and applying the
+  // wrong one drags the other end off. Each band names the wheel that moves it.
+  const paradeBands = {};
+  for (const key of ['low', 'mid', 'high']) {
+    const s = bandSum[key];
+    const frac = +(s.n / nTotal).toFixed(4);
+    if (!s.n) {
+      paradeBands[key] = { frac: 0, sparse: true, wheel: BAND_WHEEL[key], r: null, g: null, b: null, rg: null, gb: null, rb: null, spread: null };
+      continue;
+    }
+    const r = s.r / s.n;
+    const g = s.g / s.n;
+    const b = s.b / s.n;
+    paradeBands[key] = {
+      frac,
+      // `sparse` = too few pixels in this band to be evidence. Read the numbers, do not act
+      // on them: a night exterior's `high` band is three specular highlights.
+      sparse: frac < BAND_MIN_FRAC,
+      wheel: BAND_WHEEL[key],
+      r: +r.toFixed(3),
+      g: +g.toFixed(3),
+      b: +b.toFixed(3),
+      rg: +(r - g).toFixed(3),
+      gb: +(g - b).toFixed(3),
+      rb: +(r - b).toFixed(3),
+      spread: +(Math.max(r, g, b) - Math.min(r, g, b)).toFixed(3),
+    };
+  }
+  // Where the cast lives, and what shape it is — the diagnosis the band split exists for.
+  const usable = ['low', 'mid', 'high'].filter((k) => !paradeBands[k].sparse);
+  let castLocus = null;
+  let castShape = null;
+  if (usable.length) {
+    const strongest = usable.reduce((a, k) => (Math.abs(paradeBands[k].rb) > Math.abs(paradeBands[a].rb) ? k : a), usable[0]);
+    // Only name a locus when there is actually a cast to name.
+    if (Math.abs(paradeBands[strongest].rb) >= BAND_CAST_EPS) castLocus = strongest;
+    const lo = paradeBands.low.sparse ? null : paradeBands.low.rb;
+    const hi = paradeBands.high.sparse ? null : paradeBands.high.rb;
+    if (lo !== null && hi !== null) {
+      // Sign opposition is checked FIRST and beats magnitude: cool shadows against warm
+      // highlights is a deliberate split tone, not one cast that happens to be stronger at
+      // one end. Neutralizing it flattens the look the colourist built.
+      if (lo * hi < 0 && Math.abs(lo) > BAND_CAST_EPS && Math.abs(hi) > BAND_CAST_EPS) castShape = 'split_toned';
+      else if (Math.abs(hi) - Math.abs(lo) > BAND_CAST_EPS) castShape = 'grows_with_luma';
+      else if (Math.abs(lo) - Math.abs(hi) > BAND_CAST_EPS) castShape = 'shadows_only';
+      else castShape = 'uniform';
+    }
+  }
+  const bandDiagnosis = {
+    castLocus, // 'low' | 'mid' | 'high' | null (no measurable cast, or nothing to measure)
+    castShape, // see above; null when either end is sparse
+    // The wheel to reach for FIRST. Not a correction — a starting point for one.
+    wheel: castLocus ? BAND_WHEEL[castLocus] : null,
+    thresholds: { lowHi: BAND_LO_HI, midHi: BAND_MID_HI, minFrac: BAND_MIN_FRAC },
   };
   // Per-channel black-balance point (the p1 shadow value) + shadow cast spread.
   const blacks = [channels.r.p1, channels.g.p1, channels.b.p1];
@@ -245,6 +335,8 @@ export async function scopeRead(pngPath, opts = {}) {
     channels,
     luma,
     parade,
+    paradeBands,
+    bandDiagnosis,
     blackBalance,
     skinLine,
     satHistogram: satHist,

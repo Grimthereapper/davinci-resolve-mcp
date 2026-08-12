@@ -79,9 +79,42 @@ apply are the caller's job. Pick by intent:
   `grade_transfer`. **Attach a `.cube` LUT to a node** — `lut_apply`.
 - **Season/host look** — `author_look` / `carry_look`.
 - **Read frames** — `scope_read` (parade/vectorscope/black-balance/clip%),
-  `intent_tags` (low_key / motivated_warm, to exclude from neutralize),
-  `gamut_legal` (broadcast-legal, measurement only).
+  `intent_tags` (low_key / motivated_warm / split_toned, to exclude from
+  neutralize), `gamut_legal` (broadcast-legal, measurement only).
 - **Verify** — `verify_grade` (intended vs applied → landed/drifted/missing).
+
+## Diagnose a cast before you correct it
+
+`scope_read` returns `paradeBands.{low,mid,high}` — the RGB parade measured
+separately in the shadows, mids and highlights at **fixed** luma thresholds, so
+the same band is comparable across two shots — plus `bandDiagnosis`
+(`castLocus` / `castShape` / `wheel`).
+
+Use it before reaching for a correction. A cast in the shadows with clean
+highlights is a black-balance problem (Lift/Offset); one that grows with
+brightness is a white-balance problem (Gain). The whole-frame `parade` cannot
+tell them apart, and it is **blind to split toning** — cool shadows and warm
+highlights cancel to `rb ≈ 0`. `castShape: 'split_toned'` is what stops a
+gray-world `shot_match` neutralize from flattening a deliberate look; it feeds
+the `split_toned` intent tag, which is in the neutralize-exclusion set.
+
+Bands under 2% of the frame come back `sparse: true` — report them, never act on
+them.
+
+Two habits that go with it: **measure the recurring object, not the frame**
+(`scope_read` with a `rect` over a coat/wall/face that appears in both shots —
+frame averages differ because the framing differs), and **match toward the anchor,
+not toward neutral** (matched shots agree on a cast; unmatched ones wander across
+neutral). Check `meanSat` spread alongside `rb` spread — chroma is the axis that
+gets forgotten.
+
+`look_coverage` is the same measurement applied to look development: hand it the
+frames a look was judged on and it names the tonal band the set never populated.
+That band is where a badly-built look breaks. It reports coverage of the
+evidence, not quality of the look.
+
+Full craft rationale (matching order, look-vs-grade separation, the mask speed
+ladder, NR placement) is in `docs/guides/color-decision-guide.md`.
 
 ## Did the grade damage the image? (`media_analysis assess_grade`)
 

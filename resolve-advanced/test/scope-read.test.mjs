@@ -80,6 +80,82 @@ test('scope_read parade delta detects a warm cast', async () => {
   assert.ok(s.parade.spread > 50);
 });
 
+/** Half shadow-band pixels, half highlight-band pixels, each with its own cast. */
+async function twoBandFrame(file, shadow, highlight, w = 64, h = 64) {
+  const buf = Buffer.alloc(w * h * 3);
+  for (let y = 0; y < h; y++) {
+    const c = y < h / 2 ? shadow : highlight;
+    for (let x = 0; x < w; x++) {
+      const i = (y * w + x) * 3;
+      buf[i] = c.r;
+      buf[i + 1] = c.g;
+      buf[i + 2] = c.b;
+    }
+  }
+  await sharp(buf, { raw: { width: w, height: h, channels: 3 } })
+    .png()
+    .toFile(file);
+}
+
+test('scope_read splits the parade into shadow/mid/highlight bands', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'scope-'));
+  const f = path.join(dir, 'bands.png');
+  // neutral shadows (luma ~40) + neutral highlights (luma ~200): both bands populated, no cast
+  await twoBandFrame(f, { r: 40, g: 40, b: 40 }, { r: 200, g: 200, b: 200 });
+  const s = await scopeRead(f);
+  assert.ok(Math.abs(s.paradeBands.low.frac - 0.5) < 0.05, `low frac ${s.paradeBands.low.frac}`);
+  assert.ok(Math.abs(s.paradeBands.high.frac - 0.5) < 0.05, `high frac ${s.paradeBands.high.frac}`);
+  assert.equal(s.paradeBands.mid.sparse, true, 'nothing in the midtones');
+  assert.equal(s.paradeBands.low.wheel, 'lift');
+  assert.equal(s.paradeBands.mid.wheel, 'gamma');
+  assert.equal(s.paradeBands.high.wheel, 'gain');
+  assert.equal(s.paradeBands.low.spread, 0, 'neutral shadows');
+  assert.equal(s.bandDiagnosis.castLocus, null, 'a balanced frame gets no wheel to reach for');
+  assert.equal(s.bandDiagnosis.wheel, null);
+  assert.equal(s.bandDiagnosis.castShape, 'uniform');
+});
+
+test('scope_read locates a shadows-only cast and names the wheel that fixes it', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'scope-'));
+  const f = path.join(dir, 'coolshadows.png');
+  // blue-lifted shadows, neutral highlights — the classic black-balance problem
+  await twoBandFrame(f, { r: 30, g: 40, b: 70 }, { r: 200, g: 200, b: 200 });
+  const s = await scopeRead(f);
+  assert.ok(s.paradeBands.low.rb < -30, `low R−B ${s.paradeBands.low.rb}`);
+  assert.equal(s.paradeBands.high.rb, 0, 'highlights are clean');
+  assert.equal(s.bandDiagnosis.castLocus, 'low');
+  assert.equal(s.bandDiagnosis.castShape, 'shadows_only');
+  assert.equal(s.bandDiagnosis.wheel, 'lift', 'a shadow cast is a lift/offset move, not a gain move');
+});
+
+test('scope_read distinguishes a highlight cast from a split-toned frame', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'scope-'));
+  const warmHi = path.join(dir, 'warmhi.png');
+  const split = path.join(dir, 'split.png');
+  // cast grows with brightness → white-balance/gain problem
+  await twoBandFrame(warmHi, { r: 40, g: 40, b: 40 }, { r: 230, g: 195, b: 160 });
+  // cool shadows against warm highlights → deliberate split tone, NOT one cast to neutralize
+  await twoBandFrame(split, { r: 25, g: 38, b: 65 }, { r: 230, g: 195, b: 160 });
+  const sw = await scopeRead(warmHi);
+  const ss = await scopeRead(split);
+  assert.equal(sw.bandDiagnosis.castLocus, 'high');
+  assert.equal(sw.bandDiagnosis.castShape, 'grows_with_luma');
+  assert.equal(sw.bandDiagnosis.wheel, 'gain');
+  assert.equal(ss.bandDiagnosis.castShape, 'split_toned', 'opposite casts at the two ends');
+});
+
+test('scope_read marks an empty band sparse rather than inventing a cast for it', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'scope-'));
+  const f = path.join(dir, 'night.png');
+  await solid(f, { r: 18, g: 20, b: 30 }); // low-key: no mids, no highlights at all
+  const s = await scopeRead(f);
+  assert.equal(s.paradeBands.high.sparse, true);
+  assert.equal(s.paradeBands.high.frac, 0);
+  assert.equal(s.paradeBands.high.rb, null, 'no pixels → no number to act on');
+  assert.equal(s.bandDiagnosis.castLocus, 'low', 'only the populated band can carry the cast');
+  assert.equal(s.bandDiagnosis.castShape, null, 'shape is unknowable with one end empty');
+});
+
 test('scope_read measures the vectorscope skin-line only over skin pixels', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'scope-'));
   const f = path.join(dir, 'skin.png');

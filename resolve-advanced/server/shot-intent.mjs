@@ -43,6 +43,18 @@ export function deriveIntentTags(scope, meta = {}) {
   } else if (rb < -25 && s.meanSat > 0.08) {
     tags.push({ tag: 'motivated_cool', confidence: 'low', evidence: `R−B parade ${rb}` });
   }
+  // Split tone — cool shadows against warm highlights (or the reverse). The whole-frame
+  // parade CANNOT see this: the two ends cancel and `rb` comes back near zero, so none of
+  // the motivated_* tags above fire and a gray-world pass sails in and flattens a look
+  // somebody built on purpose. Only the band split catches it.
+  const bands = scope.paradeBands || {};
+  if (scope.bandDiagnosis?.castShape === 'split_toned') {
+    tags.push({
+      tag: 'split_toned',
+      confidence: 'med',
+      evidence: `shadow R−B ${bands.low?.rb} vs highlight R−B ${bands.high?.rb} (opposite ends)`,
+    });
+  }
   if (s.highContrast) tags.push({ tag: 'high_contrast', confidence: 'low', evidence: `luma range ${s.contrastRange}` });
   if (s.lowContrast) tags.push({ tag: 'low_contrast', confidence: 'low', evidence: `luma range ${s.contrastRange}` });
 
@@ -71,7 +83,7 @@ function upgradeOrAdd(tags, tag, evidence) {
 
 // Tags that mark INTENTIONAL colour/exposure — a neutralize/level pass must EXCLUDE these
 // shots (or only touch them behind an explicit override). This is the contract the matchers honor.
-export const INTENT_EXCLUDE_TAGS = new Set(['motivated_warm', 'motivated_cool', 'monochromatic', 'low_key', 'gelled', 'neon']);
+export const INTENT_EXCLUDE_TAGS = new Set(['motivated_warm', 'motivated_cool', 'monochromatic', 'low_key', 'gelled', 'neon', 'split_toned']);
 
 /**
  * Given a clip's ratified tags, should a neutralize/level pass SKIP it?
